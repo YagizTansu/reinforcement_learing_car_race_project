@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Experiments — saved models and logs (large files)
+experiments/runs/
+experiments/models/
+*.zip
+*.pkl
+
+# Keep the figures directory but ignore generated PNGs if desired
+# (comment out the next line to track figures in git)
+# experiments/figures/
+
+# Matplotlib cache
+.matplotlib/
+
+# PyTorch / SB3 checkpoints
+*.pt
+*.pth
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
