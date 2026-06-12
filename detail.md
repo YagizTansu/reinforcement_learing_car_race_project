@@ -201,13 +201,120 @@ return track.signed_curvature[indices]
 
 ## Bölüm 4 — `env.py`: RL Ortamı
 
-*(Bölüm 3 tamamlandığında burası doldurulacak)*
+### Gymnasium API — 3 zorunlu metod
+```python
+env.reset()      → obs, info
+env.step(action) → obs, reward, terminated, truncated, info
+```
+
+### Gözlem uzayı — 14 sayı
+```
+obs[0]    = d / half_width      # merkez sapması, normalize
+obs[1]    = sin(theta_e)        # yön hatası
+obs[2]    = cos(theta_e)        # yön hatası
+obs[3]    = v / v_max           # hız, normalize
+obs[4:14] = kappa[i] * 20.0     # 10 ileriye bakış eğriliği
+```
+**Neden sin/cos?** `theta_e` direkt verilse `-π` ve `+π` aynı yönü temsil eder ama sayı olarak çok farklıdır. sin/cos çifti açıyı sürekli ve benzersiz kodlar.
+
+**Neden 10 eğrilik?** Ajan `[5,10,...,110]` m ötedeki virajları görür, erken yavaşlamayı öğrenebilir.
+
+### Aksiyon uzayı — 2 sayı
+```
+action[0] ∈ [-1,1]  →  accel = 8.0 * action[0]    m/s²
+action[1] ∈ [-1,1]  →  steer = 0.45 * action[1]   rad
+```
+
+### `reset()` — Ne yapıyor?
+1. Arabayı pist başına koyar (index 0), hız=0, yön=teğet
+2. Tüm sayaçları sıfırlar: `_step_count=0`, `_unwrapped_s=0`
+3. İlk gözlemi döndürür
+
+### `step()` — Adım adım
+```
+1. action → accel, steer (scale et)
+2. car_step() → yeni CarState
+3. to_frenet() → s, d, theta_e
+4. delta_s hesapla (wrap-around yönetimi)
+5. _unwrapped_s += delta_s
+6. Ödül hesapla
+7. terminated / truncated kontrol et
+8. obs inşa et, döndür
+```
+
+### Ödül fonksiyonu
+```python
+reward = 1.0 * delta_s - 0.01
+if |d| > half_width:             reward -= 80;  terminated = True
+if unwrapped_s >= total_length:  reward += 100; terminated = True
+if step_count >= 2000:           truncated = True
+```
+
+| Terim | Neden? |
+|-------|--------|
+| `+delta_s` | İlerlemeyi ödüllendir |
+| `-0.01` | Duraksamamayı cezalandır |
+| `-80` | Pist dışına çıkmayı engelle |
+| `+100` | Tur tamamlamayı teşvik et |
+
+### `terminated` vs `truncated`
+| | `terminated` | `truncated` |
+|--|---|---|
+| Ne zaman? | Pist dışı veya tur tamamlandı | 2000 adım doldu |
+| PPO için | Gerçek bitiş, bootstrap yapma | Dışarıdan kesildi, bootstrap yap |
+
+Yanlış kullanılırsa eğitim bozulur — gymnasium bu ayrımı zorunlu kılıyor.
+
+### `_unwrapped_s` — Neden gerekli?
+`s` her zaman `[0, total_length)` arasında, start/finish'te sıfıra atlar. `_unwrapped_s` sürekli büyüyen sayaç: `>= total_length` olunca tur tamamlandı.
 
 ---
 
 ## Bölüm 5 — `train.py`: Eğitim
 
-*(Bölüm 4 tamamlandığında burası doldurulacak)*
+### PPO Nedir?
+Proximal Policy Optimization — policy'yi her adımda güncelle ama çok büyük adım atma. Büyük güncelleme policy'yi bozabilir; PPO bir klip ile sınırlar:
+
+$$L^{CLIP} = \mathbb{E}\left[\min\left(r_t \hat{A}_t,\ \text{clip}(r_t, 1-\epsilon, 1+\epsilon)\hat{A}_t\right)\right]$$
+
+$r_t$ = yeni/eski policy oranı, $\hat{A}_t$ = avantaj tahmini.
+
+### Policy Ağı (MlpPolicy)
+```
+obs (14) → [hidden_1] → ... → aksiyon (2)
+```
+
+| Net Arch | Yaklaşık parametre | Kapasite |
+|----------|-------------------|----------|
+| `[16]` | ~400 | Çok küçük |
+| `[64, 64]` | ~8.800 | Orta |
+| `[256, 256]` | ~132.000 | Büyük |
+| `[512, 512, 512]` | ~790.000 | Çok büyük |
+
+Aynı ağ hem **actor** (aksiyon üret) hem **critic** (değer tahmin et) için. **Gaussian policy:** ağ $\mu$ ve `log_std` üretiyor. Eğitimde aksiyonlar bu dağılımdan örnekleniyor (keşif). `log_std` azaldıkça ajan daha kararlı hareket eder.
+
+### `SubprocVecEnv` — Paralel Ortamlar
+8 ortam ayrı süreçlerde aynı anda çalışıyor → PPO her adımda 8x daha fazla veri topluyor → eğitim çok daha hızlı. Her işçiye farklı seed: `seed + rank`.
+
+### `EpisodeLoggerCallback`
+Her bölüm bitince `progress.csv`'ye yazar:
+```
+episode | return | length | mean_log_std | wall_clock_s
+```
+`mean_log_std` eğitim ilerledikçe azalmalı — ajan öğrendikçe daha az rastgele hareket eder.
+
+### Eğitim sonunda kaydedilenler
+```
+experiments/runs/arch64_64_seed0_fixed/
+    progress.csv       ← her bölümün istatistikleri
+    final_model.zip    ← PPO model ağırlıkları
+    config.json        ← tüm hiperparametreler + git hash
+```
+
+### CLI
+```bash
+python -m src.train --net-arch 64,64 --seed 0 --total-steps 1000000
+```
 
 ---
 
