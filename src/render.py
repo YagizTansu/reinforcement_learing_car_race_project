@@ -6,8 +6,8 @@ plot_track(track):
   along the track normal.  The normal at each point is the 90° CCW rotation
   of the unit tangent: n = (−t_y, t_x).
 
-The main block renders monaco_inspired_track() and three random tracks into
-a single figure and saves it to experiments/figures/tracks_preview.png.
+The main block renders the fixed track and saves it to
+experiments/figures/tracks_preview.png.
 """
 
 import os
@@ -19,7 +19,7 @@ import matplotlib.patches as mpatches
 from matplotlib.axes import Axes
 from typing import Optional
 
-from src.track import Track, monaco_inspired_track, random_track
+from src.track import Track, track as default_track
 
 
 def plot_track(
@@ -113,37 +113,16 @@ def plot_track(
 
 def generate_tracks_preview(
     output_path: str = "experiments/figures/tracks_preview.png",
-    seed: int = 42,
 ) -> None:
-    """Render monaco_inspired_track() and three random tracks, save to PNG.
-
-    Layout: 2 × 2 subplot grid.
-    """
+    """Render the fixed track and save to PNG."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    rng = np.random.default_rng(seed)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    fig.suptitle("Track preview", fontsize=14, fontweight="bold")
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    fig.suptitle("Track previews", fontsize=14, fontweight="bold")
-
-    # --- Top-left: Monaco-inspired ---
-    monaco = monaco_inspired_track()
-    plot_track(monaco, ax=axes[0, 0], title="Monaco-inspired\n"
-               f"({len(monaco.points)} pts, "
-               f"{monaco.total_length:.0f} m)")
-
-    # --- Three random tracks ---
-    positions = [(0, 1), (1, 0), (1, 1)]
-    for idx, (r, c) in enumerate(positions):
-        trk = random_track(rng)
-        plot_track(
-            trk,
-            ax=axes[r, c],
-            title=f"Random track {idx + 1}\n"
-                  f"({len(trk.points)} pts, "
-                  f"{trk.total_length:.0f} m)",
-            color_center=f"C{idx + 1}",
-        )
+    trk = default_track()
+    plot_track(trk, ax=ax,
+               title=f"Fixed track\n({len(trk.points)} pts, {trk.total_length:.0f} m)")
 
     plt.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")

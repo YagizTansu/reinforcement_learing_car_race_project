@@ -39,7 +39,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from src.track import monaco_inspired_track, random_track
+from src.track import track as default_track
 from src.env import CarRacingEnv
 
 
@@ -80,13 +80,7 @@ def make_env(track_mode: str, seed: int, rank: int):
     statistically independent.
     """
     def _init():
-        if track_mode == "fixed":
-            env = CarRacingEnv(track=monaco_inspired_track())
-        else:
-            # random: generate a new track on every reset()
-            def factory(rng):
-                return random_track(rng, n_control=10)
-            env = CarRacingEnv(track_factory=factory)
+        env = CarRacingEnv(track=default_track())
         env = Monitor(env)
         env.reset(seed=seed + rank)
         return env

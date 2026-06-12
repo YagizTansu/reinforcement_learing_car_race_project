@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from gymnasium.utils.env_checker import check_env
 
-from src.track import monaco_inspired_track, build_track
+from src.track import track as default_track, build_track
 from src.env import CarRacingEnv, LOOKAHEAD_DISTANCES
 from src.car import CarState, step as car_step, V_MAX, A_MAX, STEER_MAX, DT
 
@@ -18,13 +18,13 @@ from src.car import CarState, step as car_step, V_MAX, A_MAX, STEER_MAX, DT
 @pytest.fixture(scope="module")
 def monaco_env():
     """CarRacingEnv with the fixed Monaco track."""
-    return CarRacingEnv(track=monaco_inspired_track())
+    return CarRacingEnv(track=default_track())
 
 
 @pytest.fixture
 def fresh_env():
     """Fresh CarRacingEnv reset before each test."""
-    env = CarRacingEnv(track=monaco_inspired_track())
+    env = CarRacingEnv(track=default_track())
     env.reset(seed=0)
     return env
 
@@ -35,8 +35,7 @@ def fresh_env():
 
 def test_check_env():
     """gymnasium check_env must pass without warnings or errors."""
-    env = CarRacingEnv(track=monaco_inspired_track())
-    # check_env raises AssertionError on failure
+    env = CarRacingEnv(track=default_track())
     check_env(env, warn=True, skip_render_check=True)
 
 
@@ -107,7 +106,7 @@ def test_straight_stays_near_centreline(fresh_env):
 
 def test_off_track_terminates():
     """Steering hard into the wall must yield terminated=True and reward <= -80."""
-    track = monaco_inspired_track()
+    track = default_track()
     env = CarRacingEnv(track=track)
     env.reset(seed=0)
 
@@ -133,7 +132,7 @@ def test_off_track_terminates():
 
 def test_off_track_not_truncated():
     """When the car goes off-track, truncated must be False."""
-    track = monaco_inspired_track()
+    track = default_track()
     env = CarRacingEnv(track=track)
     env.reset(seed=0)
     for _ in range(2000):
@@ -153,7 +152,7 @@ def test_off_track_not_truncated():
 def test_truncation_at_max_steps():
     """Episode must set truncated=True (terminated=False) at step max_steps."""
     max_steps = 50
-    env = CarRacingEnv(track=monaco_inspired_track(), max_steps=max_steps)
+    env = CarRacingEnv(track=default_track(), max_steps=max_steps)
     env.reset(seed=0)
 
     terminated = truncated = False
@@ -202,35 +201,15 @@ def test_obs_roughly_bounded(fresh_env):
 
 
 # ---------------------------------------------------------------------------
-# 7. Factory-track variant
+# 7. Error cases
 # ---------------------------------------------------------------------------
-
-def test_track_factory_generates_new_track():
-    """When a track_factory is given, each reset should produce a different track."""
-    from src.track import random_track
-
-    def factory(rng):
-        return random_track(rng, n_control=10)
-
-    env = CarRacingEnv(track_factory=factory)
-    _, _ = env.reset(seed=0)
-    len_1 = env.track.total_length
-    _, _ = env.reset(seed=99)
-    len_2 = env.track.total_length
-
-    # Two different seeds should almost certainly give different track lengths
-    # (exact equality is astronomically unlikely)
-    assert len_1 != len_2 or True, "Different seeds gave same track (unlikely but not a bug)"
-    assert env.track is not None
-
 
 def test_env_raises_on_both_track_and_factory():
     """Providing both track and track_factory must raise ValueError."""
-    from src.track import random_track
     with pytest.raises(ValueError):
         CarRacingEnv(
-            track=monaco_inspired_track(),
-            track_factory=lambda rng: random_track(rng),
+            track=default_track(),
+            track_factory=lambda rng: default_track(),
         )
 
 

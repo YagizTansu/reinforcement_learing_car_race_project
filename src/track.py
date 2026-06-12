@@ -234,62 +234,12 @@ def build_track(ctrl_pts: np.ndarray, ds: float = RESAMPLE_DS) -> Track:
     )
 
 
-# ---------------------------------------------------------------------------
-# Validity check (used by random_track)
-# ---------------------------------------------------------------------------
-
-def _check_self_intersection(points: np.ndarray) -> bool:
-    """Return True if any two non-adjacent segments of the closed polyline
-    intersect.
-
-    Uses the standard 2D segment-segment intersection test via cross products.
-    Only checks a random subsample for speed (good enough for rejection
-    sampling of random tracks).
-    """
-    n = len(points)
-    # Build segment list: (p_i, p_{i+1 mod n})
-    segs = [(points[i], points[(i + 1) % n]) for i in range(n)]
-
-    def _cross2(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    def _segments_intersect(p1, p2, p3, p4):
-        d1 = _cross2(p3, p4, p1)
-        d2 = _cross2(p3, p4, p2)
-        d3 = _cross2(p1, p2, p3)
-        d4 = _cross2(p1, p2, p4)
-        if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
-           ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
-            return True
-        return False
-
-    # Only check a stride-2 subsample for speed
-    step = max(1, n // 200)
-    sampled = list(range(0, n, step))
-    for ii, i in enumerate(sampled):
-        p1, p2 = segs[i]
-        for j in sampled[ii + 2:]:
-            if j == (i - 1) % n or j == (i + 1) % n:
-                continue
-            p3, p4 = segs[j]
-            if _segments_intersect(p1, p2, p3, p4):
-                return True
-    return False
-
-
-def _min_turn_radius(track: Track) -> float:
-    """Minimum turn radius in metres (1/max|kappa|)."""
-    max_kappa = np.max(np.abs(track.signed_curvature))
-    if max_kappa < 1e-9:
-        return np.inf
-    return 1.0 / max_kappa
-
 
 # ---------------------------------------------------------------------------
 # Named tracks
 # ---------------------------------------------------------------------------
 
-def monaco_inspired_track() -> Track:
+def track() -> Track:
     """Return a fixed track loosely inspired by street circuits (~1.2 km).
 
     Layout (hand-tuned, all coordinates in metres):
@@ -327,77 +277,3 @@ def monaco_inspired_track() -> Track:
         [-10.0,  15.0],   # final corner entry
     ], dtype=float)
     return build_track(ctrl_pts)
-
-
-def random_track(
-    rng: np.random.Generator,
-    n_control: int = 12,
-    base_radius: float = 150.0,
-    radius_jitter: float = 0.45,
-    angle_jitter: float = 0.25,
-    max_attempts: int = 200,
-) -> Track:
-    """Generate a valid random closed track.
-
-    Control points are placed on a circle of *base_radius* metres,
-    with each radius and angular spacing perturbed by random noise.
-    The track is rejected and regenerated if it self-intersects or if its
-    minimum turn radius is less than 2 * half_width (= 12 m).
-
-    Parameters
-    ----------
-    rng : numpy.random.Generator
-        Random number generator (e.g. ``np.random.default_rng(seed)``).
-    n_control : int
-        Number of control points (8–12 per spec).
-    base_radius : float
-        Mean radius of the circle on which control points are placed.
-    radius_jitter : float
-        Fractional radius noise: r_i ~ U(1 - jitter, 1 + jitter) * base_radius.
-    angle_jitter : float
-        Fractional angular noise added to the uniform angle spacing.
-    max_attempts : int
-        Maximum number of rejection-sampling attempts before raising.
-
-    Returns
-    -------
-    Track
-
-    Raises
-    ------
-    RuntimeError
-        If no valid track is found within *max_attempts* attempts.
-    """
-    min_radius = 2.0 * HALF_WIDTH   # = 12 m
-
-    for _ in range(max_attempts):
-        # Base angles evenly spaced around the circle
-        base_angles = np.linspace(0.0, 2.0 * np.pi, n_control, endpoint=False)
-        # Add angular jitter (fraction of mean spacing)
-        mean_spacing = 2.0 * np.pi / n_control
-        angle_noise = rng.uniform(-angle_jitter, angle_jitter, n_control) * mean_spacing
-        angles = base_angles + angle_noise
-        angles = np.sort(angles)   # keep points in CCW order
-
-        # Radial jitter
-        radii = base_radius * rng.uniform(1.0 - radius_jitter, 1.0 + radius_jitter, n_control)
-
-        ctrl_pts = np.column_stack([
-            radii * np.cos(angles),
-            radii * np.sin(angles),
-        ])
-
-        track = build_track(ctrl_pts)
-
-        # Validity checks
-        if _check_self_intersection(track.points):
-            continue
-        if _min_turn_radius(track) < min_radius:
-            continue
-
-        return track
-
-    raise RuntimeError(
-        f"Could not generate a valid random track in {max_attempts} attempts. "
-        "Try reducing radius_jitter or angle_jitter."
-    )

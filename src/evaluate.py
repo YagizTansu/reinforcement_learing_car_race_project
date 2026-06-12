@@ -22,7 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 
-from src.track import monaco_inspired_track
+from src.track import track as default_track
 from src.car import DT
 from src.env import CarRacingEnv
 from src.render import plot_track
@@ -49,8 +49,8 @@ def evaluate(run_name: str, n_episodes: int) -> None:
 
     model = PPO.load(model_path)
 
-    track = monaco_inspired_track()
-    env = CarRacingEnv(track=track)
+    trk = default_track()
+    env = CarRacingEnv(track=trk)
 
     returns = []
     lengths = []
@@ -74,7 +74,7 @@ def evaluate(run_name: str, n_episodes: int) -> None:
 
         returns.append(ep_return)
         lengths.append(info["lap_time_steps"])
-        lap_done = terminated and info["unwrapped_s"] >= track.total_length
+        lap_done = terminated and info["unwrapped_s"] >= trk.total_length
         completed.append(lap_done)
         if lap_done:
             lap_times_steps.append(info["lap_time_steps"])
@@ -127,7 +127,7 @@ def evaluate(run_name: str, n_episodes: int) -> None:
     if best_trajectory is not None:
         xs, ys, lap_done = best_trajectory
         fig, ax = plt.subplots(figsize=(10, 8))
-        plot_track(track, ax=ax,
+        plot_track(trk, ax=ax,
                    title=f"Best episode — {run_name}\n"
                          f"return={best_return:.1f}  "
                          f"{'LAP COMPLETED' if lap_done else 'DNF'}")

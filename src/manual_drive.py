@@ -30,7 +30,7 @@ import matplotlib
 matplotlib.use("Agg")   # default; overridden to TkAgg in keyboard mode
 import matplotlib.pyplot as plt
 
-from src.track import monaco_inspired_track
+from src.track import track as default_track
 from src.env import CarRacingEnv
 from src.render import plot_track
 
@@ -58,12 +58,7 @@ def run_scripted(save_path: str = "experiments/figures/scripted_drive.png") -> N
     Positive d_norm → car is left of centre → steer right (negative steer cmd).
     Positive theta_e → car heading is CCW of tangent → steer right.
     """
-    track = monaco_inspired_track()
-    env = CarRacingEnv(track=track)
-
-    obs, _ = env.reset(seed=0)
-    total_reward = 0.0
-    xs, ys = [], []
+    track = default_track()
 
     terminated = truncated = False
     while not (terminated or truncated):
@@ -133,7 +128,7 @@ def run_keyboard() -> None:
     matplotlib.use("TkAgg")
     import matplotlib.pyplot as plt
 
-    track = monaco_inspired_track()
+    track = default_track()
     env = CarRacingEnv(track=track)
     obs, _ = env.reset(seed=0)
 
