@@ -320,10 +320,93 @@ python -m src.train --net-arch 64,64 --seed 0 --total-steps 1000000
 
 ## Bölüm 6 — `evaluate.py`: Değerlendirme
 
-*(Bölüm 5 tamamlandığında burası doldurulacak)*
+### Amacı
+Eğitim sırasında PPO **stokastik** davranır — keşif için aksiyonları Gaussian'dan örnekler. Değerlendirmede `deterministic=True` ile **her zaman ortalamayı** ($\mu$) seçer. Böylece ağın gerçekte ne öğrendiğini ölçeriz.
+
+```python
+action, _ = model.predict(obs, deterministic=True)
+```
+
+### Ne yapar?
+1. `final_model.zip` dosyasını yükler
+2. N bölüm (varsayılan 10) deterministik koşar
+3. Her bölümde tüm `(x, y)` noktalarını kaydeder
+4. İstatistikleri hesaplar ve kaydeder
+
+### Çıktılar
+
+**`eval_results.json`:**
+```json
+{
+  "mean_return": 312.4,
+  "std_return": 18.1,
+  "completion_rate": 0.9,
+  "mean_lap_steps": 847.0,
+  "mean_lap_secs": 42.35
+}
+```
+
+**`best_trajectory.png`:** En yüksek return'lü bölümün pist üzerindeki yolu. Renk skalası (plasma): mor = yavaş, sarı = hızlı.
+
+### Temel metrikler
+| Metrik | Ne ölçüyor? |
+|--------|-------------|
+| `mean_return` | Ortalama toplam ödül (ana performans ölçütü) |
+| `completion_rate` | Kaç bölümde tam tur atıldı (0.0–1.0) |
+| `mean_lap_secs` | Tamamlanan turların ortalama süresi — `steps × 0.05 s` |
+
+### Eğitim vs Değerlendirme
+| | Eğitim | Değerlendirme |
+|--|--------|---------------|
+| Aksiyon | Gaussian'dan örnekleme | Sadece $\mu$ (deterministic) |
+| Amaç | Policy'yi iyileştir | Policy'yi ölç |
+| Ortam | 8 paralel | 1 ortam, sırayla |
+
+### CLI
+```bash
+python -m src.evaluate --run-name arch64_64_seed0_fixed --n-episodes 20
+```
 
 ---
 
 ## Bölüm 7 — `plots.py`: Grafikler ve Analiz
 
-*(Bölüm 6 tamamlandığında burası doldurulacak)*
+### Amacı
+Tüm 16 run'ın (`4 mimari × 4 seed`) sonuçlarını birleştirip araştırma sorusunu görsel olarak cevaplamak: **ağ boyutu performansı, yakınsamayı ve zamanı nasıl etkiler?**
+
+### Üretilen 5 grafik + 1 tablo
+
+| Dosya | İçerik |
+|-------|--------|
+| `learning_curves.png` | Return vs adım sayısı, mean ± std per mimari |
+| `final_performance.png` | Bar chart: eval return + completion_rate |
+| `convergence_episodes.png` | Yakınsama bölüm sayısı, mean ± std |
+| `convergence_wallclock.png` | Aynı şey, X = gerçek süre (saniye) |
+| `sigma_decay.png` | `mean_log_std` vs adım — keşifin azalması |
+| `results_table.md` | Tüm metriklerin tek tabloda özeti |
+
+### Rolling Mean
+Ham return çok gürültülü. 50 bölümlük kayan ortalama:
+```python
+rolling = convolve(returns, [1/50] * 50)
+```
+Öğrenme trendi bu sayede net görünüyor.
+
+### Yakınsama tanımı
+```
+final_rm  = son 50 bölümün rolling ortalaması
+target    = 0.90 × final_rm
+yakınsama = rolling mean'in ilk kez target'a ulaştığı bölüm
+```
+
+### Deney ızgarası
+```
+4 mimari × 4 seed = 16 run
+Hiperparametreler tüm run'larda aynı — sadece ağ boyutu değişiyor.
+```
+
+### CLI
+```bash
+python -m src.plots           # eval'leri de çalıştırır
+python -m src.plots --no-eval # sadece mevcut JSON'lardan grafik üretir
+```
