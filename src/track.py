@@ -1,27 +1,3 @@
-"""
-track.py — Track generation for the car racing RL environment.
-
-Pipeline:
-  1. Accept a list of (x, y) control points forming a closed loop.
-  2. Fit a periodic cubic spline through the control points.
-  3. Resample at uniform arc-length spacing (default 2 m).
-  4. Compute per-sample unit tangent, signed curvature.
-
-Signed curvature formula (three-point finite difference):
-  Given consecutive points p_{i-1}, p_i, p_{i+1}, the signed curvature at p_i
-  is approximated by the Menger curvature with sign:
-
-      kappa_i = 2 * cross(p_i - p_{i-1}, p_{i+1} - p_i)
-                / (|p_i - p_{i-1}| * |p_{i+1} - p_i| * |p_{i+1} - p_{i-1}|)
-
-  where cross(a, b) = a[0]*b[1] - a[1]*b[0].
-  Positive kappa means a left turn (counterclockwise), matching the
-  right-hand rule in 2D.
-
-  Reference: Menger (1930); also see Pressley, "Elementary Differential
-  Geometry", §2.2.
-"""
-
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -31,28 +7,8 @@ HALF_WIDTH: float = 6.0      # metres, track half-width (fixed by spec)
 RESAMPLE_DS: float = 1.0     # metres, arc-length spacing between samples
 CURVATURE_SCALE: float = 20.0  # multiplier used when building the state vector
 
-
 @dataclass
 class Track:
-    """Holds a fully-discretised closed track.
-
-    Attributes
-    ----------
-    points : ndarray, shape (N, 2)
-        Uniformly-spaced centreline points [x, y] in metres.
-    cum_arc_length : ndarray, shape (N,)
-        Cumulative arc length s_i from the first point to point i.
-        s_0 = 0, s_{N-1} ≈ total track length − ds.
-    tangents : ndarray, shape (N, 2)
-        Unit tangent vectors at each point (direction of travel).
-    signed_curvature : ndarray, shape (N,)
-        Signed curvature kappa_i in m^{-1}.
-        Positive = left turn (counterclockwise).
-    half_width : float
-        Track half-width in metres.
-    total_length : float
-        Total arc length of the closed loop ≈ N * ds.
-    """
     points: np.ndarray
     cum_arc_length: np.ndarray
     tangents: np.ndarray
@@ -63,29 +19,11 @@ class Track:
     def __post_init__(self) -> None:
         self.total_length = float(self.cum_arc_length[-1]) + RESAMPLE_DS
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 def _fit_periodic_spline(ctrl_pts: np.ndarray) -> CubicSpline:
-    """Fit a periodic cubic spline through closed-loop control points.
-
-    The first point is appended at the end so the parameterisation wraps
-    exactly.  The parameter t is the cumulative chord length (a reasonable
-    arc-length proxy for the sparse control points).
-
-    Parameters
-    ----------
-    ctrl_pts : ndarray, shape (M, 2)
-        Control points.  The last point must NOT equal the first (the
-        closure is handled internally).
-
-    Returns
-    -------
-    CubicSpline
-        Spline object parameterised by chord-length t.
-    """
     # Close the loop by appending the first point
     pts = np.vstack([ctrl_pts, ctrl_pts[0]])
     # Chord-length parameterisation
@@ -96,21 +34,7 @@ def _fit_periodic_spline(ctrl_pts: np.ndarray) -> CubicSpline:
     return CubicSpline(t, pts, bc_type='periodic')
 
 
-def _resample_spline(spline: CubicSpline, ds: float = RESAMPLE_DS
-                     ) -> Tuple[np.ndarray, np.ndarray]:
-    """Walk along the spline and collect samples every *ds* metres.
-
-    Uses a simple Euler walk: evaluate the spline derivative to get the
-    instantaneous speed in parameter space, advance t by dt = ds / speed,
-    then refine with a Newton step so the arc-length increment is exact to
-    float precision.
-
-    Returns
-    -------
-    points : ndarray, shape (N, 2)
-    t_samples : ndarray, shape (N,)
-        Parameter values corresponding to each sampled point.
-    """
+def _resample_spline(spline: CubicSpline, ds: float = RESAMPLE_DS) -> Tuple[np.ndarray, np.ndarray]:
     t_end = spline.x[-1]
 
     # Dense pre-sample to estimate total arc length and build a fine table
@@ -131,21 +55,6 @@ def _resample_spline(spline: CubicSpline, ds: float = RESAMPLE_DS
 
 
 def _compute_tangents(points: np.ndarray) -> np.ndarray:
-    """Compute unit tangents from centred finite differences on a closed loop.
-
-    For interior points:
-        tangent_i = (p_{i+1} - p_{i-1}) / |p_{i+1} - p_{i-1}|
-
-    Wrap-around indexing makes it closed.
-
-    Parameters
-    ----------
-    points : ndarray, shape (N, 2)
-
-    Returns
-    -------
-    tangents : ndarray, shape (N, 2)
-    """
     n = len(points)
     p_prev = points[np.arange(n) - 1]    # wrap: index -1 → last element
     p_next = points[(np.arange(n) + 1) % n]
@@ -155,28 +64,6 @@ def _compute_tangents(points: np.ndarray) -> np.ndarray:
 
 
 def _compute_signed_curvature(points: np.ndarray) -> np.ndarray:
-    """Compute signed curvature at each point using Menger's formula.
-
-    For three consecutive points a = p_{i-1}, b = p_i, c = p_{i+1}:
-
-        kappa_i = 2 * cross(b - a, c - b)
-                  / ( |b - a| * |c - b| * |c - a| )
-
-    where cross(u, v) = u[0]*v[1] - u[1]*v[0].
-
-    Positive kappa → left turn (counterclockwise); negative → right turn.
-
-    Reference: Menger curvature, see e.g. Pressley "Elementary Differential
-    Geometry" §2.2.
-
-    Parameters
-    ----------
-    points : ndarray, shape (N, 2)
-
-    Returns
-    -------
-    kappa : ndarray, shape (N,)
-    """
     n = len(points)
     idx = np.arange(n)
     a = points[(idx - 1) % n]   # p_{i-1}
@@ -197,25 +84,11 @@ def _compute_signed_curvature(points: np.ndarray) -> np.ndarray:
     kappa = np.where(denom > 1e-12, 2.0 * cross / denom, 0.0)
     return kappa
 
-
 # ---------------------------------------------------------------------------
 # Public factory: build a Track from control points
 # ---------------------------------------------------------------------------
 
 def build_track(ctrl_pts: np.ndarray, ds: float = RESAMPLE_DS) -> Track:
-    """Build a Track from a list of control points.
-
-    Parameters
-    ----------
-    ctrl_pts : array-like, shape (M, 2)
-        Closed-loop control points (first != last).
-    ds : float
-        Desired arc-length spacing in metres.
-
-    Returns
-    -------
-    Track
-    """
     ctrl_pts = np.asarray(ctrl_pts, dtype=float)
     spline = _fit_periodic_spline(ctrl_pts)
     points, _ = _resample_spline(spline, ds)
@@ -234,28 +107,7 @@ def build_track(ctrl_pts: np.ndarray, ds: float = RESAMPLE_DS) -> Track:
     )
 
 
-
-# ---------------------------------------------------------------------------
-# Named tracks
-# ---------------------------------------------------------------------------
-
 def track() -> Track:
-    """Return a fixed track loosely inspired by street circuits (~1.2 km).
-
-    Layout (hand-tuned, all coordinates in metres):
-      - Long main straight           [0,0] → [250,0]   (~250 m)
-      - Fast chicane (left-right)    [250,0] → [310,40]
-      - Second straight              [310,40] → [370,40]
-      - Tight hairpin (right)        [370,40] → [350,130]
-      - Post-hairpin acceleration    [350,130] → [270,150]
-      - S-section (3 apexes)         [270,150] → [100,170]
-      - Slow technical corner        [100,170] → [30,120]
-      - Long sweeping return         [30,120] → [-20,60]
-      - Final corner back to start   [-20,60] → [0,0]
-
-    Control points are hand-tuned in metres; the origin is the
-    start/finish line.
-    """
     ctrl_pts = np.array([
         [0.0,    0.0],    # start / finish line
         [250.0,  0.0],    # end of main straight
