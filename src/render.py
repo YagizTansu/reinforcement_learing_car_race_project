@@ -1,15 +1,3 @@
-"""
-render.py — Matplotlib-based track visualisation.
-
-plot_track(track):
-  Draws the centreline plus left/right boundaries offset by ±half_width
-  along the track normal.  The normal at each point is the 90° CCW rotation
-  of the unit tangent: n = (−t_y, t_x).
-
-The main block renders the fixed track and saves it to
-experiments/figures/tracks_preview.png.
-"""
-
 import os
 import numpy as np
 import matplotlib
@@ -30,36 +18,6 @@ def plot_track(
     color_boundary: str = "gray",
     linewidth: float = 1.5,
 ) -> Axes:
-    """Draw a track on *ax*.
-
-    Draws:
-    - The centreline in *color_center*.
-    - Left and right boundaries offset by ±half_width along the normal.
-    - A filled band (light gray) between the boundaries.
-    - A green marker at the start point (index 0).
-
-    The normal at each sample point i is:
-        n_i = (−t_y, t_x)   (90° CCW rotation of the unit tangent)
-    Left boundary:  L_i = p_i + half_width * n_i
-    Right boundary: R_i = p_i − half_width * n_i
-
-    Parameters
-    ----------
-    track : Track
-    ax : matplotlib Axes or None
-        If None, uses the current axes.
-    title : str
-        Axes title.
-    color_center : str
-        Line colour for the centreline.
-    color_boundary : str
-        Line colour for the left/right boundary lines.
-    linewidth : float
-
-    Returns
-    -------
-    ax : matplotlib Axes
-    """
     if ax is None:
         ax = plt.gca()
 

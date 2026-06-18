@@ -1,19 +1,14 @@
 """
 evaluate.py — Deterministic evaluation of a saved PPO model.
 
-Usage
------
-    python -m src.evaluate --run-name arch64_64_seed0_fixed
-    python -m src.evaluate --run-name arch64_64_seed0_fixed --n-episodes 20
-    python -m src.evaluate --run-name arch64_64_seed0_fixed --track-seed 1000
+Normally you only need:
 
-Outputs (saved in the run directory)
-------------------------------------
-Fixed track (default):
-  eval_results.json, best_trajectory.png
+    python -m src.plots
 
-Random track (--track-seed N):
-  eval_track_seedN.json, best_trajectory_seedN.png
+This module is called automatically by plots.py. Use directly for debugging:
+
+    python -m src.evaluate --run-name arch64_64_seed0_random
+    python -m src.evaluate --run-name arch64_64_seed0_random --track-seed 1000
 """
 
 import argparse

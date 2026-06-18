@@ -14,7 +14,8 @@ _RANDOM_RADIUS_MAX: float = 280.0
 _RANDOM_LENGTH_MIN: float = 700.0    # metres
 _RANDOM_LENGTH_MAX: float = 1400.0
 _RANDOM_MAX_KAPPA: float = 0.08     # m^{-1}
-HELD_OUT_TRACK_SEEDS: list[int] = list(range(1000, 1010))  # eval-only seeds
+TRAIN_TRACK_SEEDS: list[int] = list(range(0, 50))           # multi-track training pool
+HELD_OUT_TRACK_SEEDS: list[int] = list(range(1000, 1010))  # eval-only, never in training
 
 @dataclass
 class Track:

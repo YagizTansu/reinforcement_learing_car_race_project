@@ -39,7 +39,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from src.track import track as default_track
+from src.track import track as default_track, random_track, TRAIN_TRACK_SEEDS
 from src.env import CarRacingEnv
 
 
@@ -78,9 +78,23 @@ def make_env(track_mode: str, seed: int, rank: int):
 
     Each subprocess gets a unique seed = seed + rank so they are
     statistically independent.
+
+    track_mode "fixed"  — same Monaco-inspired track every episode.
+    track_mode "random" — new procedural track each reset(), sampled from
+                          TRAIN_TRACK_SEEDS (seeds 0–49; held-out 1000+ excluded).
     """
     def _init():
-        env = CarRacingEnv(track=default_track())
+        if track_mode == "fixed":
+            env = CarRacingEnv(track=default_track())
+        elif track_mode == "random":
+
+            def track_factory(rng: np.random.Generator):
+                idx = int(rng.integers(0, len(TRAIN_TRACK_SEEDS)))
+                return random_track(TRAIN_TRACK_SEEDS[idx])
+
+            env = CarRacingEnv(track_factory=track_factory)
+        else:
+            raise ValueError(f"Unknown track_mode: {track_mode!r}")
         env = Monitor(env)
         env.reset(seed=seed + rank)
         return env
@@ -264,6 +278,8 @@ def train(
         "seed": seed,
         "total_steps": total_steps,
         "track_mode": track_mode,
+        "train_track_seeds": TRAIN_TRACK_SEEDS if track_mode == "random" else None,
+        "held_out_track_seeds": "1000-1009 (eval only, not used in training)",
         "run_name": run_name,
         "n_envs": n_envs,
         "git_hash": get_git_hash(),
