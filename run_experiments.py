@@ -5,15 +5,15 @@ Grid
 ----
   net_archs = [[16], [64,64], [256,256]]
   seeds     = [0, 1, 2, 3]
-  track     = fixed (Monaco-inspired)
+  track     = random (procedural circuits, seeds 0–49 per episode)
   steps     = 1_000_000 per run
   n_envs    = 8 (parallel workers inside each run)
 
 Naming convention
 -----------------
-  arch16_seed0_fixed
-  arch64_64_seed0_fixed
-  arch256_256_seed1_fixed
+  arch16_seed0_random
+  arch64_64_seed0_random
+  arch256_256_seed1_random
 
 Resumability
 ------------
@@ -40,7 +40,7 @@ NET_ARCHS = [
     [256, 256],
 ]
 SEEDS = [0, 1, 2, 3]
-TRACK_MODE = "fixed"
+DEFAULT_TRACK_MODE = "random"
 DEFAULT_TOTAL_STEPS = 1_000_000
 N_ENVS = 8
 RUNS_DIR = os.path.join("experiments", "runs")
@@ -51,7 +51,7 @@ def arch_to_str(arch):
     return "_".join(str(x) for x in arch)
 
 
-def run_name_for(arch, seed, track=TRACK_MODE):
+def run_name_for(arch, seed, track=DEFAULT_TRACK_MODE):
     return f"arch{arch_to_str(arch)}_seed{seed}_{track}"
 
 
@@ -107,7 +107,13 @@ def main():
                         help="Parallel envs per run (default 8)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the plan but do not train")
+    parser.add_argument("--track", choices=["fixed", "random"],
+                        default=DEFAULT_TRACK_MODE,
+                        help="fixed = same circuit every episode; "
+                             "random = procedural circuit each episode (default)")
     args = parser.parse_args()
+
+    track_mode = args.track
 
     # Build the full grid: 3 archs × 4 seeds = 12 runs
     runs = [
@@ -123,13 +129,13 @@ def main():
     print(f"  seeds     : {SEEDS}")
     print(f"  steps/run : {args.total_steps:,}")
     print(f"  n_envs    : {args.n_envs}")
-    print(f"  track     : {TRACK_MODE}")
+    print(f"  track     : {track_mode}")
     print("=" * 60)
 
     pending = []
     skipped = []
     for arch, seed in runs:
-        name = run_name_for(arch, seed)
+        name = run_name_for(arch, seed, track=track_mode)
         if model_exists(name):
             skipped.append(name)
         else:
@@ -194,7 +200,7 @@ def main():
                 net_arch=arch,
                 seed=seed,
                 total_steps=args.total_steps,
-                track_mode=TRACK_MODE,
+                track_mode=track_mode,
                 run_name=name,
                 n_envs=args.n_envs,
             )

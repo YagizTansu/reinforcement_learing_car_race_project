@@ -219,6 +219,23 @@ def test_env_raises_on_neither():
         CarRacingEnv()
 
 
+def test_random_track_factory_resets_new_track():
+    """track_factory should produce a new procedural track on each reset."""
+    from src.track import random_track, TRAIN_TRACK_SEEDS
+
+    seen_lengths = set()
+
+    def factory(rng):
+        idx = int(rng.integers(0, len(TRAIN_TRACK_SEEDS)))
+        return random_track(TRAIN_TRACK_SEEDS[idx])
+
+    env = CarRacingEnv(track_factory=factory)
+    for ep_seed in range(5):
+        env.reset(seed=ep_seed)
+        seen_lengths.add(round(env.track.total_length, 1))
+    assert len(seen_lengths) >= 2, "Expected diverse track lengths across resets"
+
+
 # ---------------------------------------------------------------------------
 # 8. Car dynamics unit tests
 # ---------------------------------------------------------------------------
