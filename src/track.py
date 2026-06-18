@@ -30,7 +30,6 @@ def _fit_periodic_spline(ctrl_pts: np.ndarray) -> CubicSpline:
     diffs = np.diff(pts, axis=0)
     chord = np.hypot(diffs[:, 0], diffs[:, 1])
     t = np.concatenate([[0.0], np.cumsum(chord)])
-    # bc_type='periodic' requires f(t[0]) == f(t[-1]), which is satisfied.
     return CubicSpline(t, pts, bc_type='periodic')
 
 
