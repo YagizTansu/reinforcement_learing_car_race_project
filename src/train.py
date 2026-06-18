@@ -160,6 +160,44 @@ class EpisodeLoggerCallback(BaseCallback):
             self._file.close()
 
 
+class StepProgressCallback(BaseCallback):
+    """Print run progress at 10% milestones with ETA."""
+
+    def __init__(self, total_steps: int, verbose: int = 0) -> None:
+        super().__init__(verbose)
+        self.total_steps = total_steps
+        self._start_time: Optional[float] = None
+        self._next_milestone = 0.10
+
+    def _on_training_start(self) -> None:
+        self._start_time = time.perf_counter()
+
+    def _on_step(self) -> bool:
+        if self.total_steps <= 0:
+            return True
+        pct = self.num_timesteps / self.total_steps
+        if pct >= self._next_milestone:
+            elapsed = time.perf_counter() - self._start_time
+            eta = elapsed * (1.0 - pct) / pct if pct > 0 else 0.0
+            print(
+                f"  >> run {self._next_milestone * 100:3.0f}%  "
+                f"({self.num_timesteps:,}/{self.total_steps:,} steps)  "
+                f"elapsed {_fmt_duration(elapsed)}  "
+                f"ETA {_fmt_duration(eta)}"
+            )
+            self._next_milestone += 0.10
+        return True
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as e.g. '14.5 min' or '3.2 h'."""
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f} min"
+    return f"{seconds / 3600:.2f} h"
+
+
 # ---------------------------------------------------------------------------
 # Main training function
 # ---------------------------------------------------------------------------
@@ -201,10 +239,15 @@ def train(
     # --- Callback ---
     csv_path = os.path.join(run_dir, "progress.csv")
     callback = EpisodeLoggerCallback(csv_path=csv_path)
+    progress_cb = StepProgressCallback(total_steps=total_steps)
 
     # --- Train ---
     t0 = time.perf_counter()
-    model.learn(total_timesteps=total_steps, callback=callback, progress_bar=False)
+    model.learn(
+        total_timesteps=total_steps,
+        callback=[callback, progress_cb],
+        progress_bar=False,
+    )
     elapsed = time.perf_counter() - t0
 
     steps_per_sec = total_steps / elapsed
