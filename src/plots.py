@@ -5,8 +5,8 @@ After training with run_experiments.py, run:
 
     python -m src.plots
 
-This evaluates any missing runs (reference circuit + held-out tracks) and
-writes all figures to experiments/figures/.
+This evaluates all runs on the reference circuit, picks the winning
+architecture, then evaluates that checkpoint on held-out tracks.
 
 Outputs
 -------
@@ -19,6 +19,7 @@ Options
 -------
   --n-eval 20     episodes per evaluation (default 20)
   --no-eval       skip re-running evaluate; use cached JSON files only
+  --gen-run NAME  override auto-selected checkpoint for generalization section
 """
 
 import argparse
@@ -45,10 +46,6 @@ RUNS_DIR    = os.path.join("experiments", "runs")
 
 ROLLING_WINDOW = 50
 CONVERGENCE_THRESHOLD = 0.90
-
-# Default model for generalization section (overridden in main() from --track)
-GEN_RUN_NAME = "arch64_64_seed0_random"
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -433,28 +430,106 @@ def load_or_run_gen_eval(
     return evaluate(run_name, n_episodes=n_eval, track_seed=track_seed)
 
 
-def collect_generalization_data(
+def eval_held_out_for_run(
     run_name: str,
     held_out_seeds: list[int],
     n_eval: int,
     *,
     run_eval: bool,
-) -> tuple[Optional[dict], dict[int, Optional[dict]]]:
-    """Reference-circuit eval + held-out procedural tracks."""
-    ref_path = os.path.join(_gen_run_dir(run_name), "eval_results.json")
-    ref_eval = None
-    if os.path.isfile(ref_path):
-        with open(ref_path) as f:
-            ref_eval = json.load(f)
-    elif run_eval and os.path.isfile(os.path.join(_gen_run_dir(run_name), "final_model.zip")):
-        from src.evaluate import evaluate
-        ref_eval = evaluate(run_name, n_episodes=n_eval, track_seed=None)
-
-    held_out = {
+) -> dict[int, Optional[dict]]:
+    """Load or run held-out eval JSONs for one checkpoint."""
+    return {
         ts: load_or_run_gen_eval(run_name, ts, n_eval, run_eval=run_eval)
         for ts in held_out_seeds
     }
-    return ref_eval, held_out
+
+
+def _reference_score(eval_result: dict) -> tuple:
+    """Higher is better: completion, return, shorter lap time."""
+    lap = eval_result.get("mean_lap_steps")
+    lap_score = -float(lap) if lap is not None else -float("inf")
+    return (
+        float(eval_result["completion_rate"]),
+        float(eval_result["mean_return"]),
+        lap_score,
+    )
+
+
+def arch_reference_score(arch: list, eval_data: dict) -> Optional[tuple]:
+    """Mean reference-circuit score across seeds for one architecture."""
+    eval_vals = [
+        eval_data[(tuple(arch), s)]
+        for s in SEEDS
+        if eval_data.get((tuple(arch), s)) is not None
+    ]
+    if not eval_vals:
+        return None
+    cr = float(np.mean([v["completion_rate"] for v in eval_vals]))
+    ret = float(np.mean([v["mean_return"] for v in eval_vals]))
+    lap_vals = [v["mean_lap_steps"] for v in eval_vals if v.get("mean_lap_steps")]
+    lap_score = -float(np.mean(lap_vals)) if lap_vals else -float("inf")
+    return (cr, ret, lap_score)
+
+
+def pick_best_arch(eval_data: dict) -> Optional[list]:
+    """Winning architecture from reference-circuit eval (mean over seeds)."""
+    best_arch = None
+    best_score: tuple = (-1.0, -float("inf"), -float("inf"))
+    for arch in NET_ARCHS:
+        score = arch_reference_score(arch, eval_data)
+        if score is not None and score > best_score:
+            best_score = score
+            best_arch = arch
+    return best_arch
+
+
+def pick_best_seed_for_arch(arch: list, eval_data: dict) -> int:
+    """Best seed within one architecture on the reference circuit."""
+    best_seed = SEEDS[0]
+    best_score: tuple = (-1.0, -float("inf"), -float("inf"))
+    for seed in SEEDS:
+        ev = eval_data.get((tuple(arch), seed))
+        if ev is None:
+            continue
+        score = _reference_score(ev)
+        if score > best_score:
+            best_score = score
+            best_seed = seed
+    return best_seed
+
+
+def select_generalization_run(eval_data: dict, override: Optional[str] = None) -> Optional[str]:
+    """Checkpoint for held-out generalization section."""
+    if override:
+        return override
+    winning_arch = pick_best_arch(eval_data)
+    if winning_arch is None:
+        return None
+    seed = pick_best_seed_for_arch(winning_arch, eval_data)
+    return run_name_for(winning_arch, seed)
+
+
+def summarize_held_out(held_out: dict[int, Optional[dict]]) -> Optional[dict]:
+    """Mean completion and return across held-out tracks."""
+    vals = [v for v in held_out.values() if v is not None]
+    if not vals:
+        return None
+    return {
+        "mean_completion": float(np.mean([v["completion_rate"] for v in vals])),
+        "mean_return": float(np.mean([v["mean_return"] for v in vals])),
+        "n_tracks": len(vals),
+    }
+
+
+def load_ref_eval(run_name: str, n_eval: int, *, run_eval: bool) -> Optional[dict]:
+    ref_path = os.path.join(_gen_run_dir(run_name), "eval_results.json")
+    if os.path.isfile(ref_path):
+        with open(ref_path) as f:
+            return json.load(f)
+    if run_eval and os.path.isfile(os.path.join(_gen_run_dir(run_name), "final_model.zip")):
+        from src.evaluate import evaluate
+        return evaluate(run_name, n_episodes=n_eval, track_seed=None)
+    return None
 
 
 def plot_heldout_tracks_preview(held_out_seeds: list[int]) -> None:
@@ -546,7 +621,11 @@ def plot_generalization(
     print(f"Saved: {out}")
 
 
-def plot_generalization_per_track(held_out: dict[int, Optional[dict]]) -> None:
+def plot_generalization_per_track(
+    held_out: dict[int, Optional[dict]],
+    *,
+    run_name: str,
+) -> None:
     seeds = sorted(held_out.keys())
     if not any(held_out.get(s) is not None for s in seeds):
         print("Skipping generalization_per_track.png (no data).")
@@ -560,7 +639,7 @@ def plot_generalization_per_track(held_out: dict[int, Optional[dict]]) -> None:
     ax.set_xlabel("Held-out track seed")
     ax.set_ylabel("Completion rate (%)")
     ax.set_ylim(0, 110)
-    ax.set_title("Completion per held-out track")
+    ax.set_title(f"Completion per held-out track — {run_name}")
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     out = os.path.join(FIGURES_DIR, "generalization_per_track.png")
@@ -573,15 +652,24 @@ def write_generalization_table(
     run_name: str,
     ref_eval: Optional[dict],
     held_out: dict[int, Optional[dict]],
+    *,
+    winning_arch_label: Optional[str] = None,
 ) -> None:
     lines = [
         "# Generalization results\n",
+    ]
+    if winning_arch_label:
+        lines.append(
+            f"Checkpoint from winning architecture **{winning_arch_label}** "
+            "(best reference-circuit seed: completion → return → lap time).\n"
+        )
+    lines.extend([
         f"Model: `{run_name}` — trained on **random circuits** (seeds 0–49).\n",
         "Test: reference circuit + held-out seeds 1000–1009.\n",
         "",
         "| Track | Seed | Length (m) | Completion | Mean return |",
         "|---|---|---|---|---|",
-    ]
+    ])
 
     if ref_eval:
         lines.append(
@@ -691,6 +779,14 @@ def write_results_table(arch_data: dict, eval_data: dict) -> None:
         )
         rows.append(row)
 
+    winning_arch = pick_best_arch(eval_data)
+    winning_note = ""
+    if winning_arch is not None:
+        winning_note = (
+            f"\n**Winning architecture (reference circuit, mean over seeds):** "
+            f"{arch_label(winning_arch)}\n"
+        )
+
     threshold_pct = int(CONVERGENCE_THRESHOLD * 100)
     content = (
         f"# Experiment results\n\n"
@@ -699,7 +795,7 @@ def write_results_table(arch_data: dict, eval_data: dict) -> None:
         f"of the run's own final {ROLLING_WINDOW}-episode rolling mean.\n\n"
         + header
         + "\n".join(rows)
-        + "\n"
+        + winning_note
     )
 
     out = os.path.join(FIGURES_DIR, "results_table.md")
@@ -713,6 +809,8 @@ def write_results_table(arch_data: dict, eval_data: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
+    global TRACK_MODE
+
     from src.track import HELD_OUT_TRACK_SEEDS
 
     parser = argparse.ArgumentParser(description="Generate all experiment figures")
@@ -722,11 +820,11 @@ def main():
                         help="Episodes per evaluation run (default 20)")
     parser.add_argument("--no-eval", action="store_true",
                         help="Use cached eval JSONs only; do not re-run evaluate")
+    parser.add_argument("--gen-run", default=None,
+                        help="Override checkpoint for generalization section")
     args = parser.parse_args()
 
-    global TRACK_MODE
     TRACK_MODE = args.track
-    gen_run = f"arch64_64_seed0_{TRACK_MODE}"
 
     run_eval = not args.no_eval
     os.makedirs(FIGURES_DIR, exist_ok=True)
@@ -777,17 +875,37 @@ def main():
     plot_convergence(arch_data)
     write_results_table(arch_data, eval_data)
 
-    print(f"\nGeneralization ({gen_run} on held-out tracks)...")
-    ref_eval, held_out = collect_generalization_data(
-        gen_run, HELD_OUT_TRACK_SEEDS, args.n_eval, run_eval=run_eval,
-    )
-    n_ho = sum(1 for v in held_out.values() if v is not None)
-    print(f"Held-out eval: {n_ho} / {len(HELD_OUT_TRACK_SEEDS)} tracks.")
+    winning_arch = pick_best_arch(eval_data)
+    gen_run = select_generalization_run(eval_data, override=args.gen_run)
+    if gen_run and winning_arch and args.gen_run is None:
+        print(
+            f"\nGeneralization checkpoint: {gen_run} "
+            f"(winning arch {arch_label(winning_arch)} on reference circuit)"
+        )
+    elif gen_run:
+        print(f"\nGeneralization checkpoint: {gen_run} (manual override)")
+    else:
+        print("\nNo reference-circuit eval data — skipping generalization section.")
+
     plot_heldout_tracks_preview(HELD_OUT_TRACK_SEEDS)
-    if n_ho > 0 or ref_eval:
-        plot_generalization(gen_run, ref_eval, held_out)
-        plot_generalization_per_track(held_out)
-        write_generalization_table(gen_run, ref_eval, held_out)
+
+    if gen_run:
+        ref_eval = load_ref_eval(gen_run, args.n_eval, run_eval=run_eval)
+        held_out = eval_held_out_for_run(
+            gen_run, HELD_OUT_TRACK_SEEDS, args.n_eval, run_eval=run_eval,
+        )
+        n_ho = sum(1 for v in held_out.values() if v is not None)
+        print(f"Held-out eval: {n_ho} / {len(HELD_OUT_TRACK_SEEDS)} tracks.")
+        if ref_eval or summarize_held_out(held_out):
+            plot_generalization(gen_run, ref_eval, held_out)
+            plot_generalization_per_track(held_out, run_name=gen_run)
+            write_generalization_table(
+                gen_run, ref_eval, held_out,
+                winning_arch_label=(
+                    arch_label(winning_arch)
+                    if winning_arch and args.gen_run is None else None
+                ),
+            )
 
     print(f"\nDone. Figures in {FIGURES_DIR}/")
 
