@@ -1,35 +1,58 @@
-# How to Run the Project
+# Car Race — 2D Racing with PPO
 
-All commands from the **project root**.
+A reinforcement learning project that trains a car to complete a 2D racetrack lap in **minimum time** using **Proximal Policy Optimization (PPO)**.
 
-## 1. Install
+**Research question:** How does policy network size (`[16]`, `[64,64]`, `[256,256]`) affect (1) final performance, (2) episodes to convergence, and (3) wall-clock training time?
+
+## Overview
+
+- **Environment:** Custom Gymnasium env — kinematic bicycle model, Frenet coordinates
+- **State:** Lateral offset, heading error, speed, lookahead curvature (14 dims)
+- **Action:** Throttle/brake + steering (continuous, 2 dims)
+- **Algorithm:** PPO with a Gaussian MLP policy (Stable-Baselines3)
+- **Training:** A new procedural track every episode (`--track random`, seeds 0–49)
+- **Testing:** Reference circuit + **held-out** tracks never seen in training (seeds 1000–1009)
+
+```
+src/
+  track.py, car.py, frenet.py, env.py   # simulation
+  train.py, evaluate.py, plots.py       # training & analysis
+  render.py
+run_experiments.py                      # 12-run campaign
+tests/
+experiments/
+  runs/                                 # models & logs (gitignored)
+  figures/                              # plots
+report/                                 # PDF report
+```
+
+## Setup
+
+Python 3.11+
 
 ```bash
 pip install numpy matplotlib scipy gymnasium stable-baselines3 pytest
 ```
 
-## 2. Test
+## How to run
+
+All commands from the project root.
+
+### 1. Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-## 3. Train (12 runs)
+### 2. Training (12 runs)
 
-Default: **random** circuits each episode.
+3 architectures × 4 seeds, 1M steps per run, random track each episode:
 
 ```bash
 python run_experiments.py
 ```
 
-Fixed circuit (same track every episode):
-
-```bash
-python run_experiments.py --track fixed
-```
-
-Run names: `arch64_64_seed0_random` or `arch64_64_seed0_fixed`.  
-Resumable: skips runs that already have `final_model.zip`.
+Runs are resumable — folders that already contain `final_model.zip` are skipped.
 
 Quick smoke test:
 
@@ -37,31 +60,30 @@ Quick smoke test:
 python run_experiments.py --total-steps 100000
 ```
 
-## 4. Plots (eval + all figures)
-
-Match the track mode used during training:
+Fixed-track training (optional):
 
 ```bash
-python -m src.plots                  # random runs (default)
-python -m src.plots --track fixed    # fixed runs
+python run_experiments.py --track fixed
+python -m src.plots --track fixed
 ```
 
-Figures: learning curves, final performance, convergence, sigma decay, results table, generalization.
+### 3. Plots
 
-Use cached eval only (faster, no new evaluate runs):
+Runs any missing evaluations and writes all figures:
+
+```bash
+python -m src.plots
+```
+
+Output: `experiments/figures/` (learning curves, final performance, convergence, generalization, etc.)
+
+Plot from cached results only (no re-evaluation):
 
 ```bash
 python -m src.plots --no-eval
 ```
 
-## 5. Report (optional)
-
-```bash
-./report/build_html.sh
-./report/build_pdf.sh
-```
-
-## Full pipeline
+### Full pipeline
 
 ```bash
 pytest tests/ -v
@@ -69,11 +91,10 @@ python run_experiments.py
 python -m src.plots
 ```
 
-## Manual debug (optional)
-
-`evaluate.py` is used automatically by `plots`. For a single check:
+## Single run (manual)
 
 ```bash
-python -m src.evaluate --run-name arch64_64_seed0_random
-python -m src.evaluate --run-name arch64_64_seed0_random --track-seed 1000
+python -m src.train --net-arch 64,64 --seed 0 --track random --total-steps 1000000
 ```
+
+Default run name: `arch64_64_seed0_random`
