@@ -8,7 +8,7 @@ Usage
 
 CLI arguments
 -------------
---net-arch      Comma-separated hidden layer sizes, e.g. "64,64" or "16" or "512,512,512".
+--net-arch      Comma-separated hidden layer sizes, e.g. "64,64" or "16" or "256,256".
 --seed          Integer random seed (seeds Python, NumPy, PyTorch, and SB3).
 --total-steps   Total environment steps (default: 1_000_000).
 --track         "fixed" (monaco) or "random" (new track each episode).

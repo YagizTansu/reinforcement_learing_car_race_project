@@ -3,7 +3,7 @@ run_experiments.py — Sequential experiment campaign launcher.
 
 Grid
 ----
-  net_archs = [[16], [64,64], [256,256], [512,512,512]]
+  net_archs = [[16], [64,64], [256,256]]
   seeds     = [0, 1, 2, 3]
   track     = fixed (Monaco-inspired)
   steps     = 1_000_000 per run
@@ -14,7 +14,6 @@ Naming convention
   arch16_seed0_fixed
   arch64_64_seed0_fixed
   arch256_256_seed1_fixed
-  arch512_512_512_seed3_fixed
 
 Resumability
 ------------
@@ -38,7 +37,6 @@ NET_ARCHS = [
     [16],
     [64, 64],
     [256, 256],
-    [512, 512, 512],
 ]
 SEEDS = [0, 1, 2, 3]
 TRACK_MODE = "fixed"
@@ -70,7 +68,7 @@ def main():
                         help="Print the plan but do not train")
     args = parser.parse_args()
 
-    # Build the full grid: 4 archs × 4 seeds = 16 runs
+    # Build the full grid: 3 archs × 4 seeds = 12 runs
     runs = [
         (arch, seed)
         for arch in NET_ARCHS

@@ -1,7 +1,7 @@
 """
 plots.py — Aggregate results across seeds and produce report figures.
 
-Requires all 16 runs to be complete (or at least the seeds you want to plot).
+Requires all 12 runs to be complete (or at least the seeds you want to plot).
 Partial results are handled gracefully: missing seeds are skipped with a warning.
 
 Outputs (all saved to experiments/figures/)
@@ -41,7 +41,6 @@ NET_ARCHS = [
     [16],
     [64, 64],
     [256, 256],
-    [512, 512, 512],
 ]
 SEEDS = [0, 1, 2, 3]
 TRACK_MODE = "fixed"
