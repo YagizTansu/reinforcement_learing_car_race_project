@@ -7,6 +7,15 @@ HALF_WIDTH: float = 6.0      # metres, track half-width (fixed by spec)
 RESAMPLE_DS: float = 1.0     # metres, arc-length spacing between samples
 CURVATURE_SCALE: float = 20.0  # multiplier used when building the state vector
 
+# Procedural random tracks (random_track); never used during fixed-track training
+_RANDOM_N_CTRL: int = 10
+_RANDOM_RADIUS_MIN: float = 120.0   # metres
+_RANDOM_RADIUS_MAX: float = 280.0
+_RANDOM_LENGTH_MIN: float = 700.0    # metres
+_RANDOM_LENGTH_MAX: float = 1400.0
+_RANDOM_MAX_KAPPA: float = 0.08     # m^{-1}
+HELD_OUT_TRACK_SEEDS: list[int] = list(range(1000, 1010))  # eval-only seeds
+
 @dataclass
 class Track:
     points: np.ndarray
@@ -128,3 +137,32 @@ def track() -> Track:
         [-10.0,  15.0],   # final corner entry
     ], dtype=float)
     return build_track(ctrl_pts)
+
+
+def _control_points_from_seed(seed: int) -> np.ndarray:
+    """Polar control points with equal base angles and random radii."""
+    rng = np.random.default_rng(seed)
+    angles = np.linspace(0.0, 2.0 * np.pi, _RANDOM_N_CTRL, endpoint=False)
+    angles += rng.uniform(-0.08, 0.08, size=_RANDOM_N_CTRL)
+    radii = rng.uniform(_RANDOM_RADIUS_MIN, _RANDOM_RADIUS_MAX, size=_RANDOM_N_CTRL)
+    return np.column_stack([radii * np.cos(angles), radii * np.sin(angles)])
+
+
+def random_track(seed: int, max_attempts: int = 50) -> Track:
+    """Build a procedural closed track from *seed* (reproducible).
+
+    Control points lie on a perturbed polar grid; ``build_track`` runs the
+    usual spline pipeline.  If length or curvature is out of range, ``seed+1``
+    is tried (at most *max_attempts* times).
+    """
+    for attempt in range(max_attempts):
+        ctrl = _control_points_from_seed(seed + attempt)
+        trk = build_track(ctrl)
+        max_kappa = float(np.max(np.abs(trk.signed_curvature)))
+        if (_RANDOM_LENGTH_MIN <= trk.total_length <= _RANDOM_LENGTH_MAX
+                and max_kappa <= _RANDOM_MAX_KAPPA):
+            return trk
+    raise ValueError(
+        f"Could not generate a valid random track for seed {seed} "
+        f"in {max_attempts} attempts"
+    )

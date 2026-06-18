@@ -12,24 +12,25 @@ Outputs (all saved to experiments/figures/)
 4. convergence_wallclock.png — same but x = wall-clock seconds
 5. sigma_decay.png          — policy log_std vs env steps per arch
 6. results_table.md         — summary table, one row per arch
-
-Convergence definition (stated in axis labels and docstrings)
--------------------------------------------------------------
-  "Convergence" = first episode where the 50-episode rolling mean
-  return >= 90% of the run's own final 50-episode rolling mean.
-  If never reached, the run is excluded from that arch's average.
+7. generalization.png       — fixed vs held-out random tracks (zero-shot)
+8. generalization_per_track.png — completion per held-out seed
+9. heldout_tracks_preview.png — layout of held-out procedural tracks
+10. generalization_table.md — per-track zero-shot metrics
 
 Usage
 -----
   python -m src.plots                  # use eval from evaluate.py (20 eps)
   python -m src.plots --n-eval 5       # quick re-eval with fewer episodes
   python -m src.plots --no-eval        # skip re-eval, use cached eval_results.json
+  python -m src.plots --gen-run-name arch64_64_seed0_fixed
+  python -m src.plots --no-gen-eval    # skip held-out re-evaluation
 """
 
 import argparse
 import json
 import os
 import warnings
+from typing import Optional
 
 import numpy as np
 import matplotlib
@@ -49,6 +50,9 @@ RUNS_DIR    = os.path.join("experiments", "runs")
 
 ROLLING_WINDOW = 50       # episodes for rolling mean
 CONVERGENCE_THRESHOLD = 0.90   # 90 % of final rolling mean
+
+# Zero-shot generalization: model trained on fixed track, tested on these seeds
+DEFAULT_GEN_RUN_NAME = "arch64_64_seed0_fixed"
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +408,228 @@ def plot_sigma_decay(arch_data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 7. Zero-shot generalization (fixed-trained model on random tracks)
+# ---------------------------------------------------------------------------
+
+def _gen_run_dir(run_name: str) -> str:
+    return os.path.join(RUNS_DIR, run_name)
+
+
+def _gen_eval_path(run_name: str, track_seed: int) -> str:
+    return os.path.join(_gen_run_dir(run_name), f"eval_track_seed{track_seed}.json")
+
+
+def load_or_run_gen_eval(
+    run_name: str,
+    track_seed: int,
+    n_eval: int,
+    *,
+    run_eval: bool,
+) -> Optional[dict]:
+    """Load held-out eval JSON or run evaluate() if missing."""
+    path = _gen_eval_path(run_name, track_seed)
+    if os.path.isfile(path):
+        with open(path) as f:
+            return json.load(f)
+    if not run_eval:
+        return None
+    model_path = os.path.join(_gen_run_dir(run_name), "final_model.zip")
+    if not os.path.isfile(model_path):
+        return None
+    from src.evaluate import evaluate
+    return evaluate(run_name, n_episodes=n_eval, track_seed=track_seed)
+
+
+def collect_generalization_data(
+    run_name: str,
+    held_out_seeds: list[int],
+    n_eval: int,
+    *,
+    run_eval: bool,
+) -> tuple[Optional[dict], dict[int, dict]]:
+    """Return (fixed_eval, {track_seed: eval_dict})."""
+    fixed_path = os.path.join(_gen_run_dir(run_name), "eval_results.json")
+    fixed_eval = None
+    if os.path.isfile(fixed_path):
+        with open(fixed_path) as f:
+            fixed_eval = json.load(f)
+    elif run_eval:
+        from src.evaluate import evaluate
+        fixed_eval = evaluate(run_name, n_episodes=n_eval, track_seed=None)
+
+    held_out = {}
+    for ts in held_out_seeds:
+        held_out[ts] = load_or_run_gen_eval(
+            run_name, ts, n_eval, run_eval=run_eval,
+        )
+    return fixed_eval, held_out
+
+
+def plot_heldout_tracks_preview(held_out_seeds: list[int]) -> None:
+    """Grid of procedural track layouts (held-out seeds)."""
+    from src.track import random_track
+    from src.render import plot_track
+
+    n = len(held_out_seeds)
+    ncols = min(5, n)
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 3.0 * nrows))
+    axes = np.atleast_1d(axes).flatten()
+
+    for i, ts in enumerate(held_out_seeds):
+        trk = random_track(ts)
+        plot_track(trk, ax=axes[i],
+                   title=f"seed {ts}\n{trk.total_length:.0f} m")
+    for j in range(len(held_out_seeds), len(axes)):
+        axes[j].axis("off")
+
+    fig.suptitle("Held-out procedural tracks (not used in training)", fontsize=13)
+    fig.tight_layout()
+    out = os.path.join(FIGURES_DIR, "heldout_tracks_preview.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out}")
+
+
+def plot_generalization(
+    run_name: str,
+    fixed_eval: Optional[dict],
+    held_out: dict[int, Optional[dict]],
+) -> None:
+    """Bar chart: training track vs mean held-out completion and return."""
+    held_vals = [v for v in held_out.values() if v is not None]
+    if not held_vals:
+        print("Skipping generalization.png (no held-out eval data).")
+        return
+
+    ho_cr = [v["completion_rate"] * 100 for v in held_vals]
+    ho_ret = [v["mean_return"] for v in held_vals]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    fig.suptitle(
+        f"Zero-shot generalization — {run_name}\n"
+        f"(trained on fixed track, tested on unseen procedural tracks)",
+        fontsize=12,
+    )
+
+    labels = ["Training track\n(fixed)"]
+    cr_means = [fixed_eval["completion_rate"] * 100] if fixed_eval else [0]
+    cr_stds = [0]
+    if held_vals:
+        labels.append(f"Held-out random\n(n={len(ho_cr)} seeds)")
+        cr_means.append(np.mean(ho_cr))
+        cr_stds.append(np.std(ho_cr) if len(ho_cr) > 1 else 0)
+
+    x = np.arange(len(labels))
+    axes[0].bar(x, cr_means, yerr=cr_stds, capsize=6, color=["steelblue", "coral"][:len(labels)],
+                alpha=0.85, edgecolor="black")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(labels, fontsize=10)
+    axes[0].set_ylabel("Completion rate (%)")
+    axes[0].set_ylim(0, 110)
+    axes[0].set_title("Lap completion")
+    axes[0].grid(True, axis="y", alpha=0.3)
+
+    ret_means = [fixed_eval["mean_return"]] if fixed_eval else [0]
+    ret_stds = [fixed_eval.get("std_return", 0)] if fixed_eval else [0]
+    if held_vals:
+        ret_means.append(np.mean(ho_ret))
+        ret_stds.append(np.std(ho_ret) if len(ho_ret) > 1 else 0)
+
+    axes[1].bar(x, ret_means, yerr=ret_stds, capsize=6, color=["steelblue", "coral"][:len(labels)],
+                alpha=0.85, edgecolor="black")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(labels, fontsize=10)
+    axes[1].set_ylabel("Mean eval return")
+    axes[1].set_title("Episode return")
+    axes[1].grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    out = os.path.join(FIGURES_DIR, "generalization.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out}")
+
+
+def plot_generalization_per_track(held_out: dict[int, Optional[dict]]) -> None:
+    """Per held-out seed: completion rate bar chart."""
+    seeds = sorted(held_out.keys())
+    vals = [held_out[s] for s in seeds]
+    if not any(v is not None for v in vals):
+        print("Skipping generalization_per_track.png (no data).")
+        return
+
+    crs = [(held_out[s]["completion_rate"] * 100) if held_out[s] else 0 for s in seeds]
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.bar(range(len(seeds)), crs, color="coral", alpha=0.85, edgecolor="black")
+    ax.set_xticks(range(len(seeds)))
+    ax.set_xticklabels([str(s) for s in seeds], fontsize=9)
+    ax.set_xlabel("Track seed (held-out, not seen in training)")
+    ax.set_ylabel("Completion rate (%)")
+    ax.set_ylim(0, 110)
+    ax.set_title("Zero-shot completion per held-out track")
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.tight_layout()
+    out = os.path.join(FIGURES_DIR, "generalization_per_track.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out}")
+
+
+def write_generalization_table(
+    run_name: str,
+    fixed_eval: Optional[dict],
+    held_out: dict[int, Optional[dict]],
+) -> None:
+    """Markdown table: fixed track + each held-out seed."""
+    lines = [
+        "# Zero-shot generalization\n",
+        f"Model: `{run_name}` (trained on **fixed** track only).\n",
+        "Held-out seeds are procedural tracks from `random_track(seed)` "
+        f"with seeds {min(held_out)}–{max(held_out)} — never used during training.\n",
+        "",
+        "| Track | Seed | Length (m) | Completion | Mean return | Lap time (sim s) |",
+        "|---|---|---|---|---|---|",
+    ]
+
+    if fixed_eval:
+        lines.append(
+            f"| Training (fixed) | — | {fixed_eval.get('track_length_m', '—')} "
+            f"| {fixed_eval['completion_rate']*100:.1f}% "
+            f"| {fixed_eval['mean_return']:.1f} "
+            f"| {fixed_eval.get('mean_lap_sim_s') or 'N/A'} |"
+        )
+
+    for ts in sorted(held_out.keys()):
+        ev = held_out[ts]
+        if ev is None:
+            lines.append(f"| Held-out random | {ts} | — | — | — | — |")
+            continue
+        lap = ev.get("mean_lap_sim_s")
+        lap_str = f"{lap:.2f}" if lap is not None else "N/A"
+        lines.append(
+            f"| Held-out random | {ts} | {ev.get('track_length_m', '—')} "
+            f"| {ev['completion_rate']*100:.1f}% "
+            f"| {ev['mean_return']:.1f} "
+            f"| {lap_str} |"
+        )
+
+    ho = [v for v in held_out.values() if v is not None]
+    if ho:
+        mean_cr = np.mean([v["completion_rate"] for v in ho]) * 100
+        lines.extend([
+            "",
+            f"**Held-out mean completion:** {mean_cr:.1f}% "
+            f"(across {len(ho)} tracks)",
+        ])
+
+    out = os.path.join(FIGURES_DIR, "generalization_table.md")
+    with open(out, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"Saved: {out}")
+
+
+# ---------------------------------------------------------------------------
 # 6. Results table
 # ---------------------------------------------------------------------------
 
@@ -501,12 +727,24 @@ def write_results_table(arch_data: dict, eval_data: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
+    from src.track import HELD_OUT_TRACK_SEEDS
+
     parser = argparse.ArgumentParser(description="Generate experiment report figures")
     parser.add_argument("--n-eval", type=int, default=20,
                         help="Episodes for evaluation (if re-running eval)")
     parser.add_argument("--no-eval", action="store_true",
                         help="Skip evaluation; only use cached eval_results.json")
+    parser.add_argument("--gen-run-name", type=str, default=DEFAULT_GEN_RUN_NAME,
+                        help="Run to test on held-out tracks (fixed-trained model)")
+    parser.add_argument("--n-gen-eval", type=int, default=None,
+                        help="Episodes per held-out track (default: same as --n-eval)")
+    parser.add_argument("--no-gen-eval", action="store_true",
+                        help="Skip held-out evaluation; only plot cached JSONs")
+    parser.add_argument("--no-gen-plots", action="store_true",
+                        help="Skip all generalization figures")
     args = parser.parse_args()
+
+    n_gen_eval = args.n_gen_eval if args.n_gen_eval is not None else args.n_eval
 
     os.makedirs(FIGURES_DIR, exist_ok=True)
 
@@ -560,6 +798,28 @@ def main():
 
     plot_convergence(arch_data)
     write_results_table(arch_data, eval_data)
+
+    # --- Zero-shot generalization ---
+    if not args.no_gen_plots:
+        print("\nGeneralization (held-out random tracks)...")
+        run_gen_eval = not args.no_gen_eval
+        fixed_eval, held_out = collect_generalization_data(
+            args.gen_run_name,
+            HELD_OUT_TRACK_SEEDS,
+            n_gen_eval,
+            run_eval=run_gen_eval,
+        )
+        n_ho = sum(1 for v in held_out.values() if v is not None)
+        print(f"Held-out eval data: {n_ho} / {len(HELD_OUT_TRACK_SEEDS)} tracks.")
+        plot_heldout_tracks_preview(HELD_OUT_TRACK_SEEDS)
+        if n_ho > 0 or fixed_eval:
+            plot_generalization(args.gen_run_name, fixed_eval, held_out)
+            plot_generalization_per_track(held_out)
+            write_generalization_table(args.gen_run_name, fixed_eval, held_out)
+        else:
+            print("Skipping generalization charts (no eval data).")
+            print(f"  Run: python -m src.evaluate --run-name {args.gen_run_name}")
+            print(f"  Or:  python -m src.plots --gen-run-name {args.gen_run_name}")
 
     print(f"\nAll figures saved to {FIGURES_DIR}/")
 

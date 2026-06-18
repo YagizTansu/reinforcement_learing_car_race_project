@@ -5,16 +5,21 @@ Usage
 -----
     python -m src.evaluate --run-name arch64_64_seed0_fixed
     python -m src.evaluate --run-name arch64_64_seed0_fixed --n-episodes 20
+    python -m src.evaluate --run-name arch64_64_seed0_fixed --track-seed 1000
 
-Outputs (printed to stdout + saved in the run directory)
----------------------------------------------------------
-eval_results.json  — mean/std return, completion rate, mean lap time
-best_trajectory.png — trajectory plot of the best episode
+Outputs (saved in the run directory)
+------------------------------------
+Fixed track (default):
+  eval_results.json, best_trajectory.png
+
+Random track (--track-seed N):
+  eval_track_seedN.json, best_trajectory_seedN.png
 """
 
 import argparse
 import json
 import os
+from typing import Optional
 
 import numpy as np
 import matplotlib
@@ -22,21 +27,50 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 
-from src.track import track as default_track
+from src.track import track as default_track, random_track
 from src.car import DT
 from src.env import CarRacingEnv
 from src.render import plot_track
+
+
+def eval_results_basename(track_seed: Optional[int] = None) -> str:
+    """JSON filename for fixed vs random-track evaluation."""
+    if track_seed is None:
+        return "eval_results.json"
+    return f"eval_track_seed{track_seed}.json"
+
+
+def eval_trajectory_basename(track_seed: Optional[int] = None) -> str:
+    """PNG filename for the best-episode trajectory plot."""
+    if track_seed is None:
+        return "best_trajectory.png"
+    return f"best_trajectory_seed{track_seed}.png"
 
 
 # ---------------------------------------------------------------------------
 # Evaluation loop
 # ---------------------------------------------------------------------------
 
-def evaluate(run_name: str, n_episodes: int) -> None:
+def evaluate(
+    run_name: str,
+    n_episodes: int,
+    track_seed: Optional[int] = None,
+) -> dict:
     """Load model from *run_name*, run *n_episodes* deterministic episodes.
 
-    Always evaluates on the fixed Monaco-inspired track so results are
-    comparable across runs regardless of how the model was trained.
+    Parameters
+    ----------
+    run_name : str
+        Subdirectory under experiments/runs/.
+    n_episodes : int
+        Number of evaluation episodes.
+    track_seed : int or None
+        If None, use the fixed training track.  Otherwise ``random_track(seed)``.
+
+    Returns
+    -------
+    dict
+        Aggregated metrics (also written to JSON in the run directory).
     """
     run_dir = os.path.join("experiments", "runs", run_name)
     model_path = os.path.join(run_dir, "final_model.zip")
@@ -49,15 +83,22 @@ def evaluate(run_name: str, n_episodes: int) -> None:
 
     model = PPO.load(model_path)
 
-    trk = default_track()
+    if track_seed is None:
+        trk = default_track()
+        track_label = "fixed (training track)"
+    else:
+        trk = random_track(track_seed)
+        track_label = f"random seed={track_seed}"
+
     env = CarRacingEnv(track=trk)
 
     returns = []
-    lengths = []
-    lap_times_steps = []   # steps for completed laps only
+    lap_times_steps = []
     completed = []
     best_return = -np.inf
-    best_trajectory = None   # (xs, ys) of the best episode
+    best_trajectory = None
+
+    print(f"Track: {track_label}  ({trk.total_length:.0f} m, {len(trk.points)} pts)")
 
     for ep in range(n_episodes):
         obs, _ = env.reset(seed=ep)
@@ -72,9 +113,8 @@ def evaluate(run_name: str, n_episodes: int) -> None:
             xs.append(info["x"])
             ys.append(info["y"])
 
-        returns.append(ep_return)
-        lengths.append(info["lap_time_steps"])
         lap_done = terminated and info["unwrapped_s"] >= trk.total_length
+        returns.append(ep_return)
         completed.append(lap_done)
         if lap_done:
             lap_times_steps.append(info["lap_time_steps"])
@@ -87,13 +127,12 @@ def evaluate(run_name: str, n_episodes: int) -> None:
               f"steps={info['lap_time_steps']:5d}  "
               f"{'LAP' if lap_done else 'DNF'}")
 
-    # --- Aggregate stats ---
     mean_return = float(np.mean(returns))
-    std_return  = float(np.std(returns))
+    std_return = float(np.std(returns))
     completion_rate = float(np.mean(completed))
     mean_lap_steps = float(np.mean(lap_times_steps)) if lap_times_steps else float("nan")
-    std_lap_steps  = float(np.std(lap_times_steps))  if lap_times_steps else float("nan")
-    mean_lap_secs  = mean_lap_steps * DT if not np.isnan(mean_lap_steps) else float("nan")
+    std_lap_steps = float(np.std(lap_times_steps)) if lap_times_steps else float("nan")
+    mean_lap_secs = mean_lap_steps * DT if not np.isnan(mean_lap_steps) else float("nan")
 
     print()
     print("=" * 52)
@@ -107,10 +146,12 @@ def evaluate(run_name: str, n_episodes: int) -> None:
         print("  Lap time          : no completed laps")
     print("=" * 52)
 
-    # --- Save results JSON ---
     results = {
         "run_name": run_name,
         "n_episodes": n_episodes,
+        "track_mode": "fixed" if track_seed is None else "random",
+        "track_seed": track_seed,
+        "track_length_m": round(float(trk.total_length), 2),
         "mean_return": round(mean_return, 3),
         "std_return": round(std_return, 3),
         "completion_rate": round(completion_rate, 4),
@@ -118,19 +159,19 @@ def evaluate(run_name: str, n_episodes: int) -> None:
         "std_lap_steps": round(std_lap_steps, 2) if not np.isnan(std_lap_steps) else None,
         "mean_lap_sim_s": round(mean_lap_secs, 3) if not np.isnan(mean_lap_secs) else None,
     }
-    results_path = os.path.join(run_dir, "eval_results.json")
+
+    results_path = os.path.join(run_dir, eval_results_basename(track_seed))
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nResults saved: {results_path}")
 
-    # --- Best trajectory plot ---
     if best_trajectory is not None:
         xs, ys, lap_done = best_trajectory
         fig, ax = plt.subplots(figsize=(10, 8))
         plot_track(trk, ax=ax,
                    title=f"Best episode — {run_name}\n"
-                         f"return={best_return:.1f}  "
-                         f"{'LAP COMPLETED' if lap_done else 'DNF'}")
+                         f"{track_label}  return={best_return:.1f}  "
+                         f"{'LAP' if lap_done else 'DNF'}")
 
         n = len(xs)
         colors = plt.cm.plasma(np.linspace(0.0, 1.0, n))
@@ -140,10 +181,12 @@ def evaluate(run_name: str, n_episodes: int) -> None:
         ax.legend(loc="upper right", fontsize=9)
         fig.tight_layout()
 
-        fig_path = os.path.join(run_dir, "best_trajectory.png")
+        fig_path = os.path.join(run_dir, eval_trajectory_basename(track_seed))
         fig.savefig(fig_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"Trajectory saved: {fig_path}")
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -159,13 +202,12 @@ def plot_reward_curve(run_name: str) -> None:
 
     data = np.genfromtxt(csv_path, delimiter=",", skip_header=1)
     if data.ndim == 1:
-        data = data[np.newaxis, :]   # single row edge case
+        data = data[np.newaxis, :]
 
-    episodes   = data[:, 0]
-    returns    = data[:, 1]
+    episodes = data[:, 0]
+    returns = data[:, 1]
     wall_clock = data[:, 4]
 
-    # Smooth with a running mean (window = 10 % of episodes, min 5)
     window = max(5, int(len(returns) * 0.05))
     kernel = np.ones(window) / window
     smoothed = np.convolve(returns, kernel, mode="valid")
@@ -210,11 +252,13 @@ def main() -> None:
                         help="Subdirectory name under experiments/runs/")
     parser.add_argument("--n-episodes", type=int, default=20,
                         help="Number of deterministic evaluation episodes")
+    parser.add_argument("--track-seed", type=int, default=None,
+                        help="If set, evaluate on random_track(seed) instead of fixed")
     parser.add_argument("--plot-curve", action="store_true",
                         help="Also plot the training reward curve from progress.csv")
     args = parser.parse_args()
 
-    evaluate(args.run_name, args.n_episodes)
+    evaluate(args.run_name, args.n_episodes, track_seed=args.track_seed)
 
     if args.plot_curve:
         plot_reward_curve(args.run_name)
