@@ -102,6 +102,28 @@ class TestCircleTrack:
         )
 
 
+class TestRandomTrack:
+    """Procedural tracks from random_track(seed)."""
+
+    def test_random_track_valid_range(self):
+        from src.track import random_track, _RANDOM_LENGTH_MIN, _RANDOM_LENGTH_MAX
+        from src.track import _RANDOM_MAX_KAPPA
+
+        for seed in (42, 1000, 1005):
+            trk = random_track(seed)
+            assert _RANDOM_LENGTH_MIN <= trk.total_length <= _RANDOM_LENGTH_MAX
+            assert float(np.max(np.abs(trk.signed_curvature))) <= _RANDOM_MAX_KAPPA + 1e-9
+            norms = np.hypot(trk.tangents[:, 0], trk.tangents[:, 1])
+            np.testing.assert_allclose(norms, 1.0, atol=1e-6)
+
+    def test_random_track_reproducible(self):
+        from src.track import random_track
+
+        a = random_track(1000)
+        b = random_track(1000)
+        np.testing.assert_array_equal(a.points, b.points)
+
+
 # ---------------------------------------------------------------------------
 # Frenet conversion tests
 # ---------------------------------------------------------------------------
