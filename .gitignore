@@ -1,6 +1,8 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.py[cod]
 *.pyo
 *.pyd
 *.so
@@ -29,6 +31,18 @@ experiments/runs/
 experiments/models/
 *.zip
 *.pkl
+
+#report
+report/build_html.sh
+report/build_pdf.sh
+report/report.md
+report/report.html
+report/header.tex
+
+presentation/frames.tex
+presentation/speaker_notes.md
+
+#report/report.pdf
 
 # Keep the figures directory but ignore generated PNGs if desired
 # (comment out the next line to track figures in git)
