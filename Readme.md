@@ -98,3 +98,38 @@ python -m src.train --net-arch 64,64 --seed 0 --track random --total-steps 10000
 ```
 
 Default run name: `arch64_64_seed0_random`
+
+### Evaluate one model on one track
+
+From the project root. Uses deterministic actions (Gaussian mean).
+
+**Reference circuit** (hand-designed benchmark, same for all runs):
+
+```bash
+python -m src.evaluate --run-name arch16_seed3_random --n-episodes 20
+```
+
+**Procedural track** by seed (e.g. held-out seed 1000):
+
+```bash
+python -m src.evaluate --run-name arch16_seed3_random --n-episodes 20 --track-seed 1000
+```
+
+**Training-pool track** (seeds 0–49, seen during random training):
+
+```bash
+python -m src.evaluate --run-name arch16_seed3_random --n-episodes 20 --track-seed 42
+```
+
+Results are written under `experiments/runs/<run-name>/`:
+
+| Track | JSON | Trajectory PNG |
+|-------|------|----------------|
+| Reference (no `--track-seed`) | `eval_results.json` | `best_trajectory.png` |
+| Procedural (`--track-seed N`) | `eval_track_seedN.json` | `best_trajectory_seedN.png` |
+
+Optional: plot training reward curve from `progress.csv`:
+
+```bash
+python -m src.evaluate --run-name arch16_seed3_random --n-episodes 20 --plot-curve
+```

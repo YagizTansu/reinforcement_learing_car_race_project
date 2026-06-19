@@ -1,32 +1,3 @@
-"""
-run_experiments.py — Sequential experiment campaign launcher.
-
-Grid
-----
-  net_archs = [[16], [64,64], [256,256]]
-  seeds     = [0, 1, 2, 3]
-  track     = random (procedural circuits, seeds 0–49 per episode)
-  steps     = 1_000_000 per run
-  n_envs    = 8 (parallel workers inside each run)
-
-Naming convention
------------------
-  arch16_seed0_random
-  arch64_64_seed0_random
-  arch256_256_seed1_random
-
-Resumability
-------------
-  A run is skipped if experiments/runs/{run-name}/final_model.zip already
-  exists.  This lets you interrupt and resume safely.
-
-Usage
------
-  python run_experiments.py                    # full campaign
-  python run_experiments.py --dry-run          # print what would run, skip all
-  python run_experiments.py --total-steps 300000  # quick smoke of the grid
-"""
-
 import argparse
 import json
 import os
